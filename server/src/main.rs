@@ -1,3 +1,3 @@
-fn main() {
-    println!("Hello, world!");
+fn main(){
+    print!("Welcome to the server!\n");
 }

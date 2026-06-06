@@ -1,120 +1,147 @@
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::io;
+//! This example will display a simple menu using Bevy UI where you can start a new game,
+//! change some settings or quit. There is no actual game, it will just display the current
+//! settings for 5 seconds before going back to the menu.
 
-#[derive(Serialize, Deserialize)]
-struct User {
-    username: String,
-    password: String,
-}
 
-const DB_PATH: &str = "client/db";
-const DB: &str = "client/db/users.json";
+use bevy::prelude::*;
 
-// Load users. If the file is missing or empty, just start fresh.
-fn load_users() -> Vec<User> {
-    match fs::read_to_string(DB) {
-        Ok(contents) if !contents.trim().is_empty() => {
-            serde_json::from_str(&contents).unwrap_or_else(|_| Vec::new())
-        }
-        _ => Vec::new(),
-    }
-}
 
-// Save the whole list back, creating the db/ folder if needed.
-fn save_users(users: &[User]) {
-    fs::create_dir_all(DB_PATH).expect("Unable to create db folder");
-    let json = serde_json::to_string_pretty(users).expect("Unable to serialize");
-    fs::write(DB, json).expect("Unable to write file");
-}
+use client::{DisplayQuality, GameState, Volume, TEXT_COLOR};          
+use client::menu::main_menu::*;
+use client::menu::splash::*;
 
-fn register_user() {
-    println!("Registering user...");
-
-    let mut username = String::new();
-    println!("Enter username: ");
-    io::stdin()
-        .read_line(&mut username)
-        .expect("Failed to read line");
-
-    let mut password = String::new();
-    println!("Enter password: ");
-    io::stdin()
-        .read_line(&mut password)
-        .expect("Failed to read line");
-
-    let username = username.trim().to_string();
-    let mut users = load_users();
-
-    // The "username taken" check we talked about
-    if users.iter().any(|u| u.username == username) {
-        println!("That username is already taken!");
-        return;
-    }
-
-    users.push(User {
-        username,
-        password: password.trim().to_string(),
-    });
-
-    save_users(&users);
-    println!("Registered!");
-}
-
-fn login_user() {
-    println!("Logging in...");
-
-    let mut username = String::new();
-    println!("Enter username: ");
-    io::stdin()
-        .read_line(&mut username)
-        .expect("Failed to read line");
-
-    let mut password = String::new();
-    println!("Enter password: ");
-    io::stdin()
-        .read_line(&mut password)
-        .expect("Failed to read line");
-
-    let username = username.trim();
-    let password = password.trim();
-
-    let users = load_users();
-
-    if users.iter().any(|u| u.username == username && u.password == password) {
-        println!("Login successful!");
-    } else {
-        println!("Invalid username or password.");
-    }
-}   
-
-fn main_menu() {
-    println!("Welcome to ProjectR");
-    println!("1. Login");
-    println!("2. Register");
-    println!("3. Exit");
-
-    let mut choice = String::new();
-    io::stdin()
-        .read_line(&mut choice)
-        .expect("Failed to read line");
-
-    match choice.trim() {
-        "1" => login_user(  ),
-        "2" => register_user(),
-        "3" => println!("Exit selected"),
-        _ => println!("Invalid choice"),
-    }
-}
 
 fn main() {
-    main_menu();
+    App::new()
+        .add_plugins(DefaultPlugins)
+        // Insert as resource the initial value for the settings resources
+        .insert_resource(DisplayQuality::Medium)
+        .insert_resource(Volume(7))
+        // Declare the game state, whose starting value is determined by the `Default` trait
+        .init_state::<GameState>()
+        .add_systems(Startup, setup)
+        // Adds the plugins for each state
+        .add_plugins((splash_plugin, menu_plugin, game::game_plugin))
+        .run();
 }
-// use bevy::prelude::*;
 
-// fn main() {
+fn setup(mut commands: Commands) {
+    commands.spawn(Camera2d);
+}
 
-//     App::new()
-//         .add_plugins(DefaultPlugins)
-//         .run();
-// }
+
+
+mod game {
+    use bevy::{
+        color::palettes::basic::{BLUE, LIME},
+        prelude::*,
+    };
+
+    use super::{DisplayQuality, GameState, Volume, TEXT_COLOR};
+
+    // This plugin will contain the game. In this case, it's just be a screen that will
+    // display the current settings for 5 seconds before returning to the menu
+    pub fn game_plugin(app: &mut App) {
+        app.add_systems(OnEnter(GameState::Game), game_setup)
+            .add_systems(Update, game.run_if(in_state(GameState::Game)));
+    }
+
+    // Tag component used to tag entities added on the game screen
+    #[derive(Component)]
+    struct OnGameScreen;
+
+    #[derive(Resource, Deref, DerefMut)]
+    struct GameTimer(Timer);
+
+    fn game_setup(
+        mut commands: Commands,
+        display_quality: Res<DisplayQuality>,
+        volume: Res<Volume>,
+    ) {
+        commands.spawn((
+            DespawnOnExit(GameState::Game),
+            Node {
+                width: percent(100),
+                height: percent(100),
+                // center children
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            OnGameScreen,
+            children![(
+                Node {
+                    // This will display its children in a column, from top to bottom
+                    flex_direction: FlexDirection::Column,
+                    // `align_items` will align children on the cross axis. Here the main axis is
+                    // vertical (column), so the cross axis is horizontal. This will center the
+                    // children
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::BLACK),
+                children![
+                    (
+                        Text::new("Will be back to the menu shortly..."),
+                        TextFont {
+                            font_size: 67.0,
+                            ..default()
+                        },
+                        TextColor(TEXT_COLOR),
+                        Node {
+                            margin: UiRect::all(px(50)),
+                            ..default()
+                        },
+                    ),
+                    (
+                        Text::default(),
+                        Node {
+                            margin: UiRect::all(px(50)),
+                            ..default()
+                        },
+                        children![
+                            (
+                                TextSpan(format!("quality: {:?}", *display_quality)),
+                                TextFont {
+                                    font_size: 50.0,
+                                    ..default()
+                                },
+                                TextColor(BLUE.into()),
+                            ),
+                            (
+                                TextSpan::new(" - "),
+                                TextFont {
+                                    font_size: 50.0,
+                                    ..default()
+                                },
+                                TextColor(TEXT_COLOR),
+                            ),
+                            (
+                                TextSpan(format!("volume: {:?}", *volume)),
+                                TextFont {
+                                    font_size: 50.0,
+                                    ..default()
+                                },
+                                TextColor(LIME.into()),
+                            ),
+                        ]
+                    ),
+                ]
+            )],
+        ));
+        // Spawn a 5 seconds timer to trigger going back to the menu
+        commands.insert_resource(GameTimer(Timer::from_seconds(5.0, TimerMode::Once)));
+    }
+
+    // Tick the timer, and change state when finished
+    fn game(
+        time: Res<Time>,
+        mut game_state: ResMut<NextState<GameState>>,
+        mut timer: ResMut<GameTimer>,
+    ) {
+        if timer.tick(time.delta()).is_finished() {
+            game_state.set(GameState::Menu);
+        }
+    }
+}
+
