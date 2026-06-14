@@ -102,7 +102,6 @@ pub fn menu_action(
     >,
     mut app_exit_writer: MessageWriter<AppExit>,
     mut menu_state: ResMut<NextState<MenuState>>,
-    mut game_state: ResMut<NextState<GameState>>,
     mut settings_state: ResMut<NextState<SettingsState>>,
     mut auth_state: ResMut<NextState<AuthState>>,
 ) {
@@ -114,11 +113,11 @@ pub fn menu_action(
                 }
                 MenuButtonAction::Login => {
                     menu_state.set(MenuState::Auth);
-                    auth_state.set(AuthState::Login)
+                    auth_state.set(AuthState::Login);
                 }
                 MenuButtonAction::Register => {
-                    game_state.set(GameState::Game);
-                    menu_state.set(MenuState::Disabled);
+                    menu_state.set(MenuState::Auth);
+                    auth_state.set(AuthState::Register);
                 }
                 MenuButtonAction::Settings => {
                     menu_state.set(MenuState::Settings);

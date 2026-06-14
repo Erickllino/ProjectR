@@ -11,7 +11,7 @@ use client::menu::menu_plugin;
 use client::menu::splash::*;
 
 mod game;
-use game::game::game_plugin;  
+use game::test_game::game_plugin;  
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)

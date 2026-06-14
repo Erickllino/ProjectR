@@ -6,13 +6,48 @@ use bevy::{
     prelude::*,
 };
 
-
-
 use crate::GameState;
 
+// These constants are defined in `Transform` units.
+// Using the default 2D camera they correspond 1:1 with screen pixels.
+const PADDLE_SIZE: Vec2 = Vec2::new(120.0, 20.0);
+const GAP_BETWEEN_PADDLE_AND_FLOOR: f32 = 60.0;
+const PADDLE_SPEED: f32 = 500.0;
+// How close can the paddle get to the wall
+const PADDLE_PADDING: f32 = 10.0;
 
-const MAP_SIZE : Vec2 = Vec2::new(120.0, 20.0);
-const PADDLE_SIZE: Vec2 = Vec2::new(20.0, 5.0);
+// We set the z-value of the ball to 1 so it renders on top in the case of overlapping sprites.
+const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
+const BALL_DIAMETER: f32 = 30.;
+const BALL_SPEED: f32 = 400.0;
+const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
+
+const WALL_THICKNESS: f32 = 10.0;
+// x coordinates
+const LEFT_WALL: f32 = -450.;
+const RIGHT_WALL: f32 = 450.;
+// y coordinates
+const BOTTOM_WALL: f32 = -300.;
+const TOP_WALL: f32 = 300.;
+
+const BRICK_SIZE: Vec2 = Vec2::new(100., 30.);
+// These values are exact
+const GAP_BETWEEN_PADDLE_AND_BRICKS: f32 = 270.0;
+const GAP_BETWEEN_BRICKS: f32 = 5.0;
+// These values are lower bounds, as the number of bricks is computed
+const GAP_BETWEEN_BRICKS_AND_CEILING: f32 = 20.0;
+const GAP_BETWEEN_BRICKS_AND_SIDES: f32 = 20.0;
+
+const SCOREBOARD_FONT_SIZE: f32 = 33.0;
+const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
+
+const BACKGROUND_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
+const PADDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.7);
+const BALL_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
+const BRICK_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
+const WALL_COLOR: Color = Color::srgb(0.8, 0.8, 0.8);
+const TEXT_COLOR: Color = Color::srgb(0.5, 0.5, 1.0);
+const SCORE_COLOR: Color = Color::srgb(1.0, 0.5, 0.5);
 
 pub fn game_plugin(app: &mut App) {
     app.insert_resource(Score(0))
@@ -32,7 +67,99 @@ pub fn game_plugin(app: &mut App) {
         .add_observer(play_collision_sound);
 }
 
+#[derive(Component)]
+struct Paddle;
 
+#[derive(Component)]
+struct Ball;
+
+#[derive(Component, Deref, DerefMut)]
+struct Velocity(Vec2);
+
+#[derive(Event)]
+struct BallCollided;
+
+#[derive(Component)]
+struct Brick;
+
+#[derive(Resource, Deref)]
+struct CollisionSound(Handle<AudioSource>);
+
+// Default must be implemented to define this as a required component for the Wall component below
+#[derive(Component, Default)]
+struct Collider;
+
+// This is a collection of the components that define a "Wall" in our game
+#[derive(Component)]
+#[require(Sprite, Transform, Collider)]
+struct Wall;
+
+/// Which side of the arena is this wall located on?
+enum WallLocation {
+    Left,
+    Right,
+    Bottom,
+    Top,
+}
+
+impl WallLocation {
+    /// Location of the *center* of the wall, used in `transform.translation()`
+    fn position(&self) -> Vec2 {
+        match self {
+            WallLocation::Left => Vec2::new(LEFT_WALL, 0.),
+            WallLocation::Right => Vec2::new(RIGHT_WALL, 0.),
+            WallLocation::Bottom => Vec2::new(0., BOTTOM_WALL),
+            WallLocation::Top => Vec2::new(0., TOP_WALL),
+        }
+    }
+
+    /// (x, y) dimensions of the wall, used in `transform.scale()`
+    fn size(&self) -> Vec2 {
+        let arena_height = TOP_WALL - BOTTOM_WALL;
+        let arena_width = RIGHT_WALL - LEFT_WALL;
+        // Make sure we haven't messed up our constants
+        assert!(arena_height > 0.0);
+        assert!(arena_width > 0.0);
+
+        match self {
+            WallLocation::Left | WallLocation::Right => {
+                Vec2::new(WALL_THICKNESS, arena_height + WALL_THICKNESS)
+            }
+            WallLocation::Bottom | WallLocation::Top => {
+                Vec2::new(arena_width + WALL_THICKNESS, WALL_THICKNESS)
+            }
+        }
+    }
+}
+
+impl Wall {
+    // This "builder method" allows us to reuse logic across our wall entities,
+    // making our code easier to read and less prone to bugs when we change the logic
+    // Notice the use of Sprite and Transform alongside Wall, overwriting the default values defined for the required components
+    fn new(location: WallLocation) -> (Wall, Sprite, Transform) {
+        (
+            Wall,
+            Sprite::from_color(WALL_COLOR, Vec2::ONE),
+            Transform {
+                // We need to convert our Vec2 into a Vec3, by giving it a z-coordinate
+                // This is used to determine the order of our sprites
+                translation: location.position().extend(0.0),
+                // The z-scale of 2D objects must always be 1.0,
+                // or their ordering will be affected in surprising ways.
+                // See https://github.com/bevyengine/bevy/issues/4149
+                scale: location.size().extend(1.0),
+                ..default()
+            },
+        )
+    }
+}
+
+// This resource tracks the game's score
+#[derive(Resource, Deref, DerefMut)]
+struct Score(usize);
+
+#[derive(Component)]
+struct ScoreboardUi;
 
 // Add the game's entities to our world
 fn game_setup(
