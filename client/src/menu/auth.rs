@@ -1,12 +1,13 @@
-use std::process::Child;
+
 
 use bevy::{color::palettes::css::CRIMSON, input_focus::{InputDispatchPlugin, InputFocus}, prelude::*, text};
 
 use bevy_simple_text_input::{
     TextInput,TextInputValue, TextInputPlugin, TextInputInactive, TextInputPlaceholder, TextInputTextColor,
-    TextInputTextFont,TextInputSettings,
+    TextInputTextFont,TextInputSettings, TextInputSubmitMessage,
 };
 
+use shared::{ LoginRequest, AuthResponse};
 
 use super::{AuthState, MenuState,GameState, AuthButtonAction};
 use crate::{TEXT_COLOR, NORMAL_BUTTON};
@@ -22,7 +23,7 @@ pub fn plugin(app: &mut App) {
           .add_systems(OnEnter(AuthState::Register), register_setup)
           .add_systems(
             Update,
-            (auth_action, focus).run_if(in_state(GameState::Menu)),
+            (auth_action, auth_enter, focus).run_if(in_state(GameState::Menu)),
         )
         ;
       // depois: campos de texto, validação, chamada pro server/
@@ -241,44 +242,112 @@ pub fn auth_action(
                     menu_state.set(MenuState::Main);
                     auth_state.set(AuthState::Disabled);
                 }
-                AuthButtonAction::SubmitLogin => {
-                    game_state.set(GameState::Game);
-                    auth_state.set(AuthState::Disabled);
-                    menu_state.set(MenuState::Disabled);
+                action => {
+                    let (Ok(username), Ok(password)) = (username_q.single(), password_q.single()) else {
+                        warn!("login fields not found");
+                        return;
+                    };
 
-                    //print!("Username: ", )
-                    let (Ok(username), Ok(password)) = (username_q.single(),password_q.single()) else {
-                                warn!("login fields not found");
-                                return;
-                            };
-                    
-                    
-                    println!("Username: {}  Password: {}", username.0, password.0);
-
-
-                }
-                AuthButtonAction::SubmitRegister => {
-                    game_state.set(GameState::Game);
-                    auth_state.set(AuthState::Disabled);
-                    menu_state.set(MenuState::Disabled);
-
-                    let (Ok(username), Ok(password)) = (username_q.single(),password_q.single()) else {
-                                warn!("Register fields not found");
-                                return;
-                            };
-                    check_login(&username.0, &password.0);
-                    
-                    println!("Username: {}  Password: {}", username.0, password.0);
+                    do_submit(
+                        action,
+                        &username.0,
+                        &password.0,
+                        &mut game_state,
+                        &mut auth_state,
+                        &mut menu_state,
+                    );
                 }
             }
         }
     }
 }
 
-
-fn check_login(username: &String, password: &String){
-
+/// Shared submit logic for both the buttons (`auth_action`) and the Enter key
+/// (`auth_enter`). Decides what to do based on the action, then transitions
+/// the game state only if the server says the login succeeded.
+fn do_submit(
+    action: &AuthButtonAction,
+    username: &str,
+    password: &str,
+    game_state: &mut ResMut<NextState<GameState>>,
+    auth_state: &mut ResMut<NextState<AuthState>>,
+    menu_state: &mut ResMut<NextState<MenuState>>,
+) {
+    match action {
+        // Register still goes through check_login for now — swap to check_register
+        // once the server has a /register route.
+        AuthButtonAction::SubmitLogin | AuthButtonAction::SubmitRegister => {
+            match check_login(username, password) {
+                AuthResponse::Success => {
+                    game_state.set(GameState::Game);
+                    auth_state.set(AuthState::Disabled);
+                    menu_state.set(MenuState::Disabled);
+                }
+                other => warn!("login failed: {other:?}"),
+            }
+        }
+        AuthButtonAction::BackToMainMenu => {}
+    }
 }
+
+/// Submits when the player presses Enter inside a focused text box.
+/// The submit message tells us *that* Enter was pressed; we read both fields
+/// ourselves and pick login vs register from the current `AuthState`.
+fn auth_enter(
+    mut submits: MessageReader<TextInputSubmitMessage>,
+    username_q: Query<&TextInputValue, With<UsernameField>>,
+    password_q: Query<&TextInputValue, With<PasswordField>>,
+    auth_state_now: Res<State<AuthState>>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut auth_state: ResMut<NextState<AuthState>>,
+    mut menu_state: ResMut<NextState<MenuState>>,
+) {
+    // Nothing typed-and-entered this frame.
+    if submits.is_empty() {
+        return;
+    }
+    // Consume every pending submit so one Enter triggers exactly one submit.
+    submits.clear();
+
+    let (Ok(username), Ok(password)) = (username_q.single(), password_q.single()) else {
+        return;
+    };
+
+    let action = match auth_state_now.get() {
+        AuthState::Login => AuthButtonAction::SubmitLogin,
+        AuthState::Register => AuthButtonAction::SubmitRegister,
+        _ => return,
+    };
+
+    do_submit(
+        &action,
+        &username.0,
+        &password.0,
+        &mut game_state,
+        &mut auth_state,
+        &mut menu_state,
+    );
+}
+
+
+fn check_login(username: &str, password: &str) -> AuthResponse {
+    let msg = LoginRequest {
+        username: username.to_string(),
+        password: password.to_string(),
+    };
+
+    match ureq::post("http://127.0.0.1:3000/login").send_json(&msg) {
+        Ok(mut response) => response
+            .body_mut()
+            .read_json::<AuthResponse>()
+            .unwrap_or(AuthResponse::InvalidCredentials),
+        Err(e) => {
+            warn!("could not reach server: {e}");
+            AuthResponse::InvalidCredentials
+        }
+    }
+}
+
 
 
 

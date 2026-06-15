@@ -1,14 +1,22 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use serde::{Serialize,Deserialize};
+
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+#[derive(Serialize, Deserialize, Debug)]
+pub enum AuthResponse {
+    Success,
+    InvalidCredentials,
+    UsernameTaken,
 }
